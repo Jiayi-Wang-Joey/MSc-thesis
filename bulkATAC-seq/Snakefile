@@ -1,0 +1,345 @@
+import json
+import itertools
+
+configfile: "config.yaml"
+R = config["R"]
+
+############### real datasets ################
+# WILDCARDS --------------------------------------------------------------------
+# motifs
+MOT = ["GATA1","GATA2","KLF1","NR1H3", "NR1H4",
+"RUNX1", "BANP", "MYC", "RUNX2"] # "NR3C1", "MYC", "RUNX2" "ESR1"
+#MOT = ["NR1H3", "NR1H4"]
+# smoother
+#SMT = ["none","smooth.2d_0.25", "smooth.2d_0.5", "smooth.2d_0.75", "smooth.2d_1"]
+#SMT = ["none","smooth.2d_0.5", "smooth.2d_1.5", "smooth.2d_1", "smooth.2d_2"]
+SMT = ["none","smooth.2d_1.5"]
+# moderation
+MDR = ["unmoderated"]
+# peakWeight
+PKW = ["none", "loess"]
+# differential analysis methods
+DIF = glob_wildcards("code/02-dif-{x}.R").x
+PKD = glob_wildcards("code/03-pkd-{x}.R").x
+MMD = glob_wildcards("code/05-mmd-{x}.R").x
+# Symmetric or asymmetric profile
+SYM = ["sym", "asy"]
+# normalization on scores
+NRM = ["TMM"]
+
+# RESULTS --------------------------------------------------------------------
+dat_dat = "/mnt/plger/jwang/data/dat"
+# fragments
+dat_frg = expand(dat_dat+"/00-frg/{mot}.rds", mot=MOT)
+#### Weight model ####
+# distribution of fragments across bins
+dat_dis = expand(dat_dat+"/00-dist/{mot}.rds", mot=MOT)
+# counts for unweighted and weighted fragments
+dat_ttl = expand(dat_dat+"/01-total/total-{mot}.rds", mot=MOT)
+dat_wgt = expand(dat_dat+"/01-weight/weight-{mot}-{smt}-{pkw}-{mdr}.rds", mot=MOT, 
+                smt=SMT, pkw=PKW, mdr=MDR)
+# differential analysis on motif level
+dat_dif = [
+    expand("outs/dat/dif-total-{mot},{dif}.rds", mot=MOT, dif=DIF),
+    expand("outs/dat/dif-weight-{mot}-{smt}-{pkw}-{mdr},{dif}.rds", mot=MOT,
+           smt=SMT, pkw=PKW, mdr=MDR, 
+           dif=[x for x in DIF if "chromVAR" not in x and "loess" not in x])]
+# differential analysis on peak level
+dat_pkd = [
+    expand("outs/dat/pkd-total-{mot},{pkd}.rds", mot=MOT, pkd=PKD),
+    expand("outs/dat/pkd-weight-{mot}-{smt}-{pkw}-{mdr},{pkd}.rds", mot=MOT, 
+           smt=SMT, pkw=PKW, pkd=PKD, mdr=MDR)]
+
+#### Insertion model ####
+# motif match scores 
+dat_mms = expand("outs/dat/mms-{mot}-{sym}-{nrm}.rds", mot=MOT, sym=SYM, nrm=NRM)
+# differential analysis based on motif scores
+dat_mmd = expand("outs/dat/mmd-{mot}-{sym}-{nrm},{mmd}.rds", mot=MOT, sym=SYM, nrm=NRM, mmd=MMD)
+
+
+############### simulated datasets ################
+# WILDCARDS --------------------------------------------------------------------
+MTF = ["CEBPB", "ZNF143", "MAZ", "CTCF"] # "MAZ","CTCF"
+EFT = ["0", "0.25", "0.5", "1", "3"]
+
+# RESULTS --------------------------------------------------------------------
+sim_dat = "/mnt/plger/jwang/data/sim"
+sim_frg = expand(sim_dat+"/00-frg/{mtf}-{eft}.rds", mtf=MTF, eft=EFT)
+sim_ttl = expand(sim_dat+"/01-total/total-{mtf}-{eft}.rds", mtf=MTF, eft=EFT)
+sim_wgt = expand(sim_dat+"/01-weight/weight-{mtf}-{eft}-{smt}-{pkw}.rds", mtf=MTF, eft=EFT, smt=SMT, pkw=PKW)
+sim_dif = [
+    expand("outs/sim/dif-total-{mtf}-{eft}-{dif}.rds", mtf=MTF, eft=EFT, dif=DIF),
+    expand("outs/sim/dif-weight-{mtf}-{eft}-{smt}-{pkw}-{dif}.rds", mtf=MTF, eft=EFT, smt=SMT, pkw=PKW, dif=[x for x in DIF if "chromVAR" not in x])]
+sim_pkd = [
+    expand("outs/sim/pkd-total-{mtf}-{eft}-{pkd}.rds", mtf=MTF, eft=EFT, pkd=PKD),
+    expand("outs/sim/pkd-weight-{mtf}-{eft}-{smt}-{pkw}-{pkd}.rds", mtf=MTF, eft=EFT, smt=SMT, pkw=PKW, pkd=PKD)]
+sim_mms =  expand("outs/sim/mms-{mtf}-{eft}-{sym}-{nrm}.rds", mtf=MTF, eft=EFT, sym=SYM, nrm=NRM)
+
+dat_res = {
+    "frg": dat_frg,
+    "dis": dat_dis,
+    "ttl": dat_ttl,
+    "wgt": dat_wgt,
+    "dif": dat_dif,
+    "pkd": dat_pkd,
+    "mms": dat_mms,
+    "mmd": dat_mmd
+}
+
+sim_res = {
+     "sim": sim_frg,
+     "ttl": sim_ttl,
+     "wgt": sim_wgt,
+     "dif": sim_dif,
+     "pkd": sim_pkd
+     #"mms": sim_mms
+}
+
+# visualization
+plt = []
+VAL = dat_res.keys()
+WAL = sim_res.keys()
+for val in VAL:
+    x = glob_wildcards("code/08-plt_"+val+"-{x}.R").x
+    plt += expand("plts/dat/{val}-{plt}.pdf", val=val, plt=x)
+
+qlt = []
+for wal in WAL:
+    x = glob_wildcards("code/08-qlt_"+wal+"-{x}.R").x
+    qlt += expand("plts/sim/{wal}-{qlt}.pdf", wal=wal, qlt=x)
+
+# SETUP ========================================================================
+rule all: 
+    input:
+        [x for x in dat_res.values()], plt,
+        #[x for x in sim_res.values()], qlt,
+        "session_info.txt"
+        
+rule session_info:
+    priority: 100
+    input:  "code/10-session_info.R"
+    output: "session_info.txt"
+    log:    "logs/session_info.Rout"
+    shell:  '''
+    {R} CMD BATCH --no-restore --no-save\
+    "--args {output}" {input} {log}'''
+
+# real datasets
+rule get_dat:
+    priority: 99
+    input:  "code/00-get_dat.R",
+    output: dat_dat+"/00-frg/{mot}.rds"
+    log:    "logs/00-get_dat-{mot}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+
+rule dat_dist:
+    priority: 99
+    input:  "code/00-dat_dist.R",
+            dat_dat+"/00-frg/{mot}.rds"
+    output: dat_dat+"/00-dist/{mot}.rds"
+    log:    "logs/00-dat_dist-{mot}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} frg={input[1]} res={output}" {input[0]} {log}'''
+        
+rule dat_ttl:
+    priority: 98
+    input:  "code/01-dat_total.R",
+            dat_dat+"/00-frg/{mot}.rds"
+    output: dat_dat+"/01-total/total-{mot}.rds"
+    log:    "logs/01-total-{mot}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} frg={input[1]}" {input[0]} {log}'''
+
+rule dat_wgt:
+    priority: 98
+    input:  "code/01-dat_weight.R",
+            dat_dat+"/00-frg/{mot}.rds"
+    output: dat_dat+"/01-weight/weight-{mot}-{smt}-{pkw}-{mdr}.rds"
+    log:    "logs/dat_weight-{mot}-{smt}-{pkw}-{mdr}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} frg={input[1]}" {input[0]} {log}'''
+
+rule dif_ttl:
+    priority: 97
+    input:  "code/02-dif_dat.R",
+            "code/02-dif-{dif}.R",
+            rules.dat_ttl.output
+    output: "outs/dat/dif-total-{mot},{dif}.rds"
+    log:    "logs/dat_dif-total-{mot},{dif}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}'''
+
+rule dif_wgt:
+    priority: 97
+    input:  "code/02-dif_dat.R",
+            "code/02-dif-{dif}.R",
+            rules.dat_wgt.output
+    output: "outs/dat/dif-weight-{mot}-{smt}-{pkw}-{mdr},{dif}.rds"
+    log:    "logs/dat_dif-weight-{mot}-{smt}-{pkw}-{mdr},{dif}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} dif={wildcards.dif} res={output} dat={input[2]}" {input[0]} {log}''' 
+
+rule pkd_ttl:
+    priority: 96
+    input:  "code/03-pkd_dat.R",
+            "code/03-pkd-{pkd}.R",
+            rules.dat_ttl.output
+    output: "outs/dat/pkd-total-{mot},{pkd}.rds"
+    log:    "logs/dat_pkd-total-{mot},{pkd}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}'''
+
+rule pkd_wgt:
+    priority: 96
+    input:  "code/03-pkd_dat.R",
+            "code/03-pkd-{pkd}.R",
+            rules.dat_wgt.output
+    output: "outs/dat/pkd-weight-{mot}-{smt}-{pkw}-{mdr},{pkd}.rds"
+    log:    "logs/dat_pkd-weight-{mot}-{smt}-{pkw}-{mdr},{pkd}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} pkd={wildcards.pkd} res={output} dat={input[2]}" {input[0]} {log}''' 
+
+
+rule dat_mms:
+    priority: 95
+    input:  "code/04-dat_mms.R",
+    output: "outs/dat/mms-{mot}-{sym}-{nrm}.rds"
+    log:    "logs/04-dat_mms-{mot}-{sym}-{nrm}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+rule dat_mmd:
+    priority: 95
+    input:  "code/05-mmd.R",
+            "code/05-mmd-{mmd}.R",   
+            rules.dat_mms.output
+    output: "outs/dat/mmd-{mot}-{sym}-{nrm},{mmd}.rds"
+    log:    "logs/mmd-{mot}-{sym}-{nrm},{mmd}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}'''
+
+
+# simulation
+rule get_sim:
+    priority: 99
+    input:  "code/00-get_sim.R",
+    output: sim_dat+"/00-frg/{mtf}-{eft}.rds"
+    log:    "logs/00-get_sim-{mtf},{eft}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+rule sim_ttl:
+    priority: 98
+    input:  "code/01-sim_total.R",
+            rules.get_sim.output
+    output: sim_dat+"/01-total/total-{mtf}-{eft}.rds"
+    log:    "logs/01-total-{mtf},{eft}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} frg={input[1]}" {input[0]} {log}'''
+
+rule sim_wgt:
+    priority: 98
+    input:  "code/01-sim_weight.R",
+            rules.get_sim.output
+    output: "/mnt/plger/jwang/data/sim/01-weight/weight-{mtf}-{eft}-{smt}-{pkw}.rds"
+    log:    "logs/dat_weight-{mtf}-{eft}-{smt}-{pkw}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} frg={input[1]}" {input[0]} {log}'''
+
+rule dar_ttl:
+    priority: 97
+    input:  "code/02-dif_sim.R",
+            "code/02-dif-{dif}.R",
+            rules.sim_ttl.output
+    output: "outs/sim/dif-total-{mtf}-{eft}-{dif}.rds"
+    log:    "logs/sim_dif-total-{mtf}-{eft}-{dif}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}'''
+
+
+rule dar_wgt:
+    priority: 97
+    input:  "code/02-dif_sim.R",
+            "code/02-dif-{dif}.R",
+            rules.sim_wgt.output
+    output: "outs/sim/dif-weight-{mtf}-{eft}-{smt}-{pkw}-{dif}.rds"
+    log:    "logs/sim_dif-weight-{mtf}-{eft}-{smt}-{pkw}-{dif}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}'''
+
+rule pek_ttl:
+    priority: 96
+    input:  "code/03-pkd_sim.R",
+            "code/03-pkd-{pkd}.R",
+            rules.sim_ttl.output
+    output: "outs/sim/pkd-total-{mtf}-{eft}-{pkd}.rds"
+    log:    "logs/sim_pkd-total-{mtf}-{eft}-{pkd}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}'''
+
+rule pek_wgt:
+    priority: 96
+    input:  "code/03-pkd_sim.R",
+            "code/03-pkd-{pkd}.R",
+            rules.sim_wgt.output
+    output: "outs/sim/pkd-weight-{mtf}-{eft}-{smt}-{pkw}-{pkd}.rds"
+    log:    "logs/sim_pkd-weight-{mtf}-{eft}-{smt}-{pkw}-{pkd}.rds.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} fun={input[1]} res={output} dat={input[2]}" {input[0]} {log}''' 
+
+rule sim_mms:
+    priority: 95
+    input:  "code/04-sim_mms.R",
+    output: "outs/sim/mms-{mtf}-{eft}-{sym}-{nrm}.rds"
+    log:    "logs/04-sim_mms-{mtf}-{eft}-{sym}-{nrm}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+
+
+# VISUALIZATION ========================================================
+for val in VAL:
+    rule:
+        priority: 49
+        input:  expand("code/08-plt_{val}-{{plt}}.R", val = val), x = dat_res[val]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/dat/{val}-{{plt}}.pdf", val = val)
+        log:    expand("logs/dat_plt_{val}-{{plt}}.Rout", val = val)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
+    
+
+for wal in WAL:
+    rule:
+        priority: 49
+        input:  expand("code/08-qlt_{wal}-{{plt}}.R", wal = wal), x = sim_res[wal]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/sim/{wal}-{{plt}}.pdf", wal = wal)
+        log:    expand("logs/sim_plt_{wal}-{{plt}}.Rout", wal = wal)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
+
+        
+        

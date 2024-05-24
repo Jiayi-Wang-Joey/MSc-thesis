@@ -1,0 +1,448 @@
+
+
+### Dependencies
+```{r setup}
+suppressPackageStartupMessages({
+  library(SummarizedExperiment)
+  library(ggplot2)
+  library(patchwork)
+  library(ggrastr)
+  library(data.table)
+  source("~/chromVAR/R/getCounts.R")
+  library(GenomicRanges)
+  library(BSgenome.Hsapiens.UCSC.hg19)
+  library(SummarizedExperiment)
+  library(BSgenome.Mmusculus.UCSC.mm10)
+  library(fields)
+    library(GGally)
+})
+setwd("~/chromVAR2/")
+```
+
+
+### Read data
+```{r read data}
+bams <- list.files("/mnt/plger/datasets/CusanovichATACprotocols/aligned", 
+    pattern = "\\.bam$",
+    full.names = TRUE)
+sample <- vapply(bams, \(x) {
+    name <- basename(x)
+    unlist(strsplit(name, ".", fixed = TRUE))[2]
+}, character(1))
+names(bams) <- sample
+
+meta <- read.table("/mnt/plger/datasets/CusanovichATACprotocols/SraRunTable.txt",
+    sep = ",", header=TRUE)
+
+```
+
+#### original counts
+```{r origin}
+atacFrags <- readRDS("/mnt/plger/jwang/Cusanovich/origin.rds")
+names(atacFrags) <- names(bams)
+atacFrags <- atacFrags[!vapply(atacFrags, is.null, logical(1))]
+atacFrags <- atacFrags[names(atacFrags) %in% meta[meta$Organism=="Homo sapiens", "Sample.Name"]]
+
+peaks <- import.bed(con="/mnt/plger/datasets/CusanovichATACprotocols/peaks/SRX10861468.GSM5290888_summits.bed")
+
+
+#counts <- getCounts(atacFrag = atacFrags, ranges = peaks, 
+#                    genome = BSgenome.Hsapiens.UCSC.hg38, 
+#                    width = 300,
+#                    species = "Homo sapiens")
+#saveRDS(counts, "/mnt/plger/jwang/Cusanovich/counts_HS.rds")
+origin <- readRDS("/mnt/plger/jwang/Cusanovich/counts_HS.rds")
+```
+
+#### fragment weight based on GC and FLD
+```{r GC_FLD}
+low <- c("GSM5290881", "GSM5290882", "GSM5290883", 
+         "GSM5290884", "GSM5290885", "GSM5290886")
+
+high <- c("GSM5290887", "GSM5290888", "GSM5290889",
+          "GSM5290890", "GSM5290891", "GSM5290892")
+
+weights <- getCounts(atacFrag = atacFrags[c(low,high)],
+  ranges = peaks,
+  mode = "weight",
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  species = "Homo sapiens",
+  width = 300,
+  smooth = "none")
+
+saveRDS(weights, "/mnt/plger/jwang/Cusanovich/weights_HS.rds")
+fragWeight <- readRDS("/mnt/plger/jwang/Cusanovich/weights_HS.rds")
+```
+
+#### Fragment weight + peakWeight
+```{r}
+
+weights <- getCounts(atacFrag = atacFrags[c(low,high)],
+  ranges = peaks,
+  mode = "weight",
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  species = "Homo sapiens",
+  width = 300,
+  smooth = "none",
+  nGCBins = 10,
+  nWidthBins = 30,
+  peakWeight = "loess")
+
+saveRDS(weights, "/mnt/plger/jwang/Cusanovich/weights_loess.rds")
+fragWeight_loess <- readRDS("/mnt/plger/jwang/Cusanovich/weights_loess.rds")
+
+weights <- getCounts(atacFrag = atacFrags[c(low,high)],
+  ranges = peaks,
+  mode = "weight",
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  species = "Homo sapiens",
+  width = 300,
+  smooth = "none",
+  nGCBins = 10,
+  nWidthBins = 30,
+  peakWeight = "loess")
+
+saveRDS(weights, "/mnt/plger/jwang/Cusanovich/weights_loess.rds")
+fragWeight_loess <- readRDS("/mnt/plger/jwang/Cusanovich/weights_loess.rds")
+
+```
+
+
+
+
+
+### Correlation of all samples
+
+```{r, fig.height=10, fig.width=20}
+originCount <- counts(origin)
+ids <- colnames(originCount)
+originPearson <- cor(log1p(originCount), method = "pearson", use = "pairwise")
+originSpearman <- cor(originCount, method = "spearman", use = "pairwise")
+pdf(file = "~/chromVAR2/plts/tec/corrplot_pearson.pdf", width=15, height=13)
+corrplot(originPearson, 
+    insig = "blank",
+    #type = "upper",
+    #col.lim = c(0.9,1),
+    is.corr = FALSE,
+    col = COL2('RdBu'),
+    tl.cex = 0.7
+)
+dev.off()
+
+pdf(file = "~/chromVAR2/plts/tec/corrplot_spearman.pdf", width=15, height=13)
+corrplot(originSpearman, 
+    insig = "blank",
+    #type = "upper",
+    col.lim = c(0.25,1),
+    is.corr = FALSE,
+    col = COL2('RdBu'),
+    tl.cex = 0.7
+)
+dev.off()
+```
+
+
+```{r corr all, fig.height=10, fig.width=20}
+originCount <- counts(origin)
+ggcorr(originCount, method = c("pairwise", "spearman"), 
+             limits = c(0,1), midpoint = 0.5, label=FALSE) + 
+  ggtitle("Origin - Spearman") +
+    
+  
+ggcorr(originCount, method = c("pairwise", "pearson"), 
+             limits = c(0,1), midpoint = 0.5, label=FALSE) + 
+  ggtitle("Origin - Pearson")
+```
+
+
+
+### Violin plot
+```{r violin, fig.width=10}
+origin <- origin[,c(low,high)]
+#fragWeight <- fragWeight[,c(low,high)]
+
+.rename <- \(y) {
+  c(sapply(seq_len(ncol(y)/2), \(x) paste0("low", x)),
+    sapply(seq_len(ncol(y)/2), \(x) paste0("high", x)))
+}
+
+.rmDiag <- \(x, method = "spearman") {
+  colnames(x) <- .rename(x)
+  corr <- cor(x, use="pairwise", method = method)
+  corr[lower.tri(corr, diag=TRUE)] <- NA
+  na.omit(reshape2::melt(corr))
+}
+
+corDF <- rbind(data.frame(.rmDiag(counts(origin)), 
+                          cor = "Spearman", method = "origin"),
+               data.frame(.rmDiag(counts(fragWeight)), 
+                          cor = "Spearman", method = "fragWeight"),
+               data.frame(.rmDiag(counts(fragWeight_loess)), 
+                          cor = "Spearman", method = "fragWeight_peakWeight"),
+                 
+               data.frame(.rmDiag(log1p(counts(origin)), method = "pearson"), 
+                          cor = "Pearson", method = "origin"),
+               data.frame(.rmDiag(log1p(counts(fragWeight)), method = "pearson"), 
+                          cor = "Pearson", method = "fragWeight"),
+               data.frame(.rmDiag(log1p(counts(fragWeight_loess)), method = "pearson"), 
+                          cor = "Pearson", method = "fragWeight_peakWeight"))
+
+
+ggplot(corDF, aes(x=method, y=value, col=method)) +
+  geom_violin(position = position_dodge(width = 0.8), trim = FALSE) + 
+  geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.1) +
+  facet_wrap(~cor, scale="free") + theme_minimal()
+    
+```
+
+### Divide by groups
+```{r}
+corDF <- corDF %>%
+  mutate(type = case_when(
+    grepl("low", Var1) & grepl("low", Var2) ~ "within_low",
+    grepl("high", Var1) & grepl("high", Var2) ~ "within_high",
+    grepl("low", Var1) & grepl("high", Var2) ~ "between",
+    grepl("high", Var1) & grepl("low", Var2) ~ "between",
+    TRUE ~ NA_character_
+  ))
+```
+
+```{r, fig.width=12, fig.height=5}
+corDF$method <- factor(corDF$method, levels=c("origin","fragWeight","fragWeight_peakWeight"))
+corDF <- corDF[corDF$type=="between",]
+gg <- ggplot(corDF, aes(x=method, y=value, col=method)) +
+  facet_wrap2(.~cor, scales="free", axes="y") + 
+  geom_violin(position = position_dodge(width = 0.8), trim = FALSE) + 
+  geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.1)+
+  theme_bw() +
+  theme(axis.text.x=element_blank(),
+      #axis.ticks.x=element_blank(),
+      legend.position="bottom")  +
+  scale_color_brewer(palette = "Set1") +
+    ylab("Correlation coefficient") 
+
+ggsave("~/chromVAR2/plts/tec/between_corr.pdf", gg, width=18, height=10, units="cm")
+```
+
+
+
+### Investigate MA plots
+
+```{r ma}
+.limma_voom <- function(x, genome) {
+    x <- filterPeaks(x, non_overlapping = TRUE)
+    y <- assay(x, "counts")
+    group_id <- rep(LETTERS[1:2],each=ncol(y)/2)
+    design <- model.matrix(~ group_id)
+    y <- calcNormFactors(DGEList(y))
+    y <- voom(y,design)
+    fit <- eBayes(lmFit(y, design))
+    res <- topTable(fit, n = Inf)
+    ids <- match(rownames(res), rownames(y))
+    res 
+}
+
+se <- list(origin=origin, fragWeight=fragWeight, fragWeight_peakWeight = fragWeight_loess)
+pkd <- lapply(se, .limma_voom)
+
+```
+
+```{r, fig.height=15, fig.width=40}
+lapply(names(pkd), \(x){
+  df <- pkd[[x]]
+  ggplot(df, aes(x=AveExpr, y=logFC)) +
+  geom_pointdensity(alpha=0.6) +
+  geom_smooth(method="gam", size=1) +
+  ggtitle(x)
+}) |> wrap_plots(ncol=3)
+
+df <- rbindlist(pkd, idcol = "method")
+aes <- list(
+  geom_abline(intercept=0, slope=0, col="black", lty=2, alpha=0.5),
+  geom_point_rast(alpha=0.5, size=0.5),
+  geom_density2d(alpha=0.5),
+  geom_smooth(alpha=0.1, colour="darkred", linewidth=0.7),
+  theme(plot.title = element_text(size = 7)),
+  theme_bw()
+)
+
+df$method <- factor(df$method, levels=c("origin","fragWeight","fragWeight_peakWeight"))
+gg <- ggplot(df, aes(x=AveExpr, y=logFC)) +
+      aes +
+      facet_grid(~method, scales="free")
+
+
+ggsave("~/chromVAR2/plts/tec/MA.pdf", gg, width=25, height=8, units="cm")
+```
+### Scatter plot
+```{r}
+origin <- origin[,c(low,high)]
+fragWeight <- fragWeight[,c(low,high)]
+
+.rmDiag <- \(x, method = "spearman") {
+  corr <- cor(x, use="pairwise", method = method)
+  corr[lower.tri(corr, diag=TRUE)] <- NA
+  na.omit(reshape2::melt(corr))
+}
+
+corDF <- rbind(data.frame(.rmDiag(counts(origin)), 
+                          cor = "Spearman", method = "origin"),
+               data.frame(.rmDiag(counts(fragWeight)), 
+                          cor = "Spearman", method = "fragWeight"),
+               data.frame(.rmDiag(counts(fragWeight_loess)), 
+                          cor = "Spearman", method = "fragWeight_loess"),
+                 
+               data.frame(.rmDiag(counts(origin), method = "pearson"), 
+                          cor = "Pearson", method = "origin"),
+               data.frame(.rmDiag(counts(fragWeight), method = "pearson"), 
+                          cor = "Pearson", method = "fragWeight"),
+               data.frame(.rmDiag(counts(fragWeight_loess), method = "pearson"), 
+                          cor = "Pearson", method = "fragWeight_loess"))
+
+
+ggplot(corDF, aes(x=method, y=value, col=method)) +
+  geom_violin(position = position_dodge(width = 0.8), trim = FALSE) + 
+  geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.1) +
+  facet_wrap(~cor, scale="free")
+```
+
+```{r, fig.height=8, fig.width=10}
+#           Var1       Var2     value      cor           method
+#13   GSM5290881 GSM5290882 0.8889422 Spearman           origin
+#131  GSM5290881 GSM5290882 0.8485242 Spearman       fragWeight
+#132  GSM5290881 GSM5290882 0.8389646 Spearman fragWeight_loess
+#1310 GSM5290881 GSM5290882 0.9989879  Pearson           origin
+#1311 GSM5290881 GSM5290882 0.9974782  Pearson       fragWeight
+#1312 GSM5290881 GSM5290882 0.9998585  Pearson fragWeight_loess
+sample1 <- "GSM5290881"
+sample2 <- "GSM5290882"
+low_origin <- counts(origin)[,c(sample1,sample2)]
+low_fragWeight <- counts(fragWeight)[,c(sample1,sample2)]
+low_fragWeight_loess <- counts(fragWeight_loess)[,c(sample1,sample2)]
+dfs <- list(origin=low_origin, fragWeight=low_fragWeight, 
+  fragWeight=low_fragWeight_loess)
+
+lapply(names(dfs), \(x) {
+  df <- data.frame(dfs[[x]])
+  ggplot(df, aes(log(GSM5290881+1), log(GSM5290882+1))) +
+    geom_pointdensity() + theme_bw() + ggtitle(x) 
+}) |> wrap_plots(ncol=2)
+```
+
+
+between
+```{r fig.height=8, fig.width=10}
+sample1 <- "GSM5290881"
+sample2 <- "GSM5290892"
+low_origin <- counts(origin)[,c(sample1,sample2)]
+low_fragWeight <- counts(fragWeight)[,c(sample1,sample2)]
+low_fragWeight_loess <- counts(fragWeight_loess)[,c(sample1,sample2)]
+dfs <- list(origin=low_origin, fragWeight=low_fragWeight, 
+  fragWeight=low_fragWeight_loess)
+
+lapply(names(dfs), \(x) {
+  df <- data.frame(dfs[[x]])
+  ggplot(df, aes(log(GSM5290881+1), log(GSM5290892+1))) +
+    geom_pointdensity() + theme_bw() + ggtitle(x) 
+}) |> wrap_plots(ncol=2)
+```
+
+### Wilcoxon rank sum test
+```{r}
+# origin vs fragWeight spearman
+originSpearman <- corDF %>% filter(cor=="Spearman" & method=="origin")
+fragWeightSpearman <- corDF %>% filter(cor=="Spearman" & method=="fragWeight")
+fragWeightLoessSpearman <- corDF %>% filter(cor=="Spearman" & method=="fragWeight_loess")
+wilcox.test(originSpearman$value, fragWeightSpearman$value, 
+  paired=TRUE)
+
+wilcox.test(originSpearman$value, fragWeightLoessSpearman$value, 
+  paired=TRUE)
+
+wilcox.test(fragWeightSpearman$value, fragWeightLoessSpearman$value, 
+  paired=TRUE)
+```
+
+## Spearman - rank
+```{r, fig.height=6}
+dfSpear <- corDF %>% 
+  filter(cor=="Spearman") %>% 
+  group_by(method, type) %>%
+  mutate(rank = rank(-value)) %>%
+  ungroup() %>%
+  mutate(pair=paste(Var1,Var2,sep = "vs")) 
+dfSpear$method <- factor(dfSpear$method, levels=c("origin","fragWeight","fragWeight_loess"))
+
+
+ggplot(dfSpear, aes(method, rank, col=pair)) +
+  geom_point() +
+  geom_line(aes(group=pair, col=pair), alpha=0.5) +
+  guides(color="none") +
+  theme_bw() +
+  facet_grid2(~type, scales="free", independent="y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  ggtitle("Spearman - rank") +
+  theme(legend.position = "none") 
+  
+```
+
+
+
+## Spearman - value
+```{r, fig.height=6}
+dfSpear <- corDF %>% 
+  filter(cor=="Spearman") %>% 
+  group_by(method, type) %>%
+  ungroup() %>%
+  mutate(pair=paste(Var1,Var2,sep = "vs")) 
+dfSpear$method <- factor(dfSpear$method, levels=c("origin","fragWeight","fragWeight_loess"))
+
+
+ggplot(dfSpear, aes(method, value, col=pair)) +
+  geom_point() +
+  geom_line(aes(group=pair, col=pair), alpha=0.5) +
+  guides(color="none") +
+  theme_bw() +
+  facet_grid2(~type, scales="free", independent="y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  ggtitle("Spearman - rank") +
+  theme(legend.position = "none") 
+```
+
+
+
+## Pearson - rank
+```{r, fig.height=6}
+dfPear <- corDF %>% 
+  filter(cor=="Pearson") %>% 
+  group_by(method, type) %>%
+  mutate(rank = rank(-value)) %>%
+  ungroup() %>%
+  mutate(pair=paste(Var1,Var2,sep = "vs")) 
+dfPear$method <- factor(dfPear$method, levels=c("origin","fragWeight","fragWeight_loess"))
+
+
+ggplot(dfPear, aes(method, rank, col=pair)) +
+  geom_point() +
+  geom_line(aes(group=pair, col=pair), alpha=0.5) +
+  guides(color="none") +
+  theme_bw() +
+  facet_grid2(~type, scales="free", independent="y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  ggtitle("Pearson - rank") +
+  theme(legend.position = "none") 
+```
+
+## Pearson - value
+```{r, fig.height=6}
+ggplot(dfPear, aes(method, value, col=pair)) +
+  geom_point() +
+  geom_line(aes(group=pair, col=pair), alpha=0.5) +
+  guides(color="none") +
+  theme_bw() +
+  facet_grid2(~type, scales="free", independent="y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  ggtitle("Pearson - rank") +
+  theme(legend.position = "none")
+```
+
