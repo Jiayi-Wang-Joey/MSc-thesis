@@ -1,0 +1,203 @@
+import json
+import itertools
+
+configfile: "config.yaml"
+R = config["R"]
+
+############### real datasets ################
+# WILDCARDS --------------------------------------------------------------------
+# motifs
+MOT = ["NR1H4", "GATA2", "KLF1", "NR1H3"] 
+MTF = ["CTCF", "MAZ"]
+EFT = ["GC", "FLD"]
+DSG = ["group"]
+PKW = ["none", "loess"]
+SPAN = [0.3]
+SEED = list(range(0, 5000, 1000))
+nSamples = [1e4,5e4,1e5,5e5]
+nBins = [15,20,50,100]
+#DEGREE = [1]
+Family = ["symmetric"]
+
+dat_dat = "/mnt/plger/jwang/loess-comparison/dat/"
+sim_dat = "/mnt/plger/jwang/loess-comparison/sim/"
+dat_wgt = expand(dat_dat + "{mot},{span},{ns},{nb},{family},{seed}.rds", 
+                 mot=MOT, span=SPAN, ns=nSamples, nb=nBins, family=Family, seed=SEED)
+dif_wgt = expand("outs/dif-{mot},{span},{ns},{nb},{family},{seed}.rds", 
+                 mot=MOT, span=SPAN, ns=nSamples, nb=nBins, family=Family, seed=SEED)
+
+tec_wgt = expand("/mnt/plger/jwang/Cusanovich/loess_span/span_{span}.rds", span=SPAN)
+
+sim_frg = expand(sim_dat + "00-frg/{mtf},{eft},{dsg}.rds", mtf=MTF, eft=EFT, dsg=DSG)
+sim_wgt = expand(sim_dat + "01-weight/{mtf},{eft},{dsg},{pkw}.rds", mtf=MTF, eft=EFT, dsg=DSG, pkw=PKW)
+sim_ttl = expand(sim_dat + "01-total/{mtf},{eft},{dsg}.rds", mtf=MTF, eft=EFT, dsg=DSG)
+sim_pkd = [expand("outs/sim/pkd_wgt_{mtf},{eft},{dsg},{pkw}.rds", mtf=MTF, eft=EFT, dsg=DSG, pkw=PKW),
+           expand("outs/sim/pkd_ttl_{mtf},{eft},{dsg}.rds", mtf=MTF, eft=EFT, dsg=DSG)]
+
+
+dat_res = {
+    "wgt": dat_wgt,
+    "dif": dif_wgt
+    #"pkd": dat_pkd
+}
+
+tec_res = {
+    "wgt": tec_wgt
+    #"dif": dif_tec
+}
+
+sim_res = {
+    "frg": sim_frg,
+    "wgt": sim_wgt,
+    "pkd": sim_pkd
+    #"dif": dif_tec
+}
+
+
+# visualization
+plt = []
+VAL = dat_res.keys()
+for val in VAL:
+    x = glob_wildcards("code/05-plt_"+val+"-{x}.R").x
+    plt += expand("plts/dat/{val}-{plt}.pdf", val=val, plt=x)
+
+qlt = []
+WAL = tec_res.keys()
+for wal in WAL:
+    x = glob_wildcards("code/05-qlt_"+wal+"-{x}.R").x
+    qlt += expand("plts/tec/{wal}-{qlt}.pdf", wal=wal, qlt=x)
+
+flt = []
+YAL = sim_res.keys()
+for yal in YAL:
+    x = glob_wildcards("code/05-flt_"+yal+"-{x}.R").x
+    flt += expand("plts/sim/{yal}-{flt}.pdf", yal=yal, flt=x)
+
+
+# SETUP ========================================================================
+rule all: 
+    input:
+        #[x for x in dat_res.values()], plt,
+        #[x for x in tec_res.values()], qlt
+        [x for x in sim_res.values()], flt
+
+################# real datasets ######################
+rule get_wgt:
+    priority: 98
+    input:  "code/01-dat_weight.R",
+            "/mnt/plger/jwang/data/dat/01-weight/weight-{mot}-none-none-unmoderated.rds"
+    output: dat_dat + "{mot},{span},{ns},{nb},{family},{seed}.rds"
+    log:    "logs/dat_wgt_{mot},{span},{ns},{nb},{family},{seed}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} dat={input[1]} res={output}" {input[0]} {log}'''
+
+rule dif_wgt:
+    priority: 97
+    input:  "code/02-dif.R",
+            rules.get_wgt.output
+    output: "outs/dif-{mot},{span},{ns},{nb},{family},{seed}.rds"
+    log:    "logs/dif_{mot},{span},{ns},{nb},{family},{seed}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} dat={input[1]} res={output}" {input[0]} {log}'''
+
+
+############## technical datasets ##################
+rule get_tec:
+    priority: 98
+    input:  "code/01-tec_weight.R",
+    output: "/mnt/plger/jwang/Cusanovich/loess_span/span_{span}.rds"
+    log:    "logs/tec_span_{span}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+############## simulated datasets ##################
+rule sim_frg:
+    priority: 98
+    input:  "code/00-sim_frg.R",
+    output: sim_dat + "00-frg/{mtf},{eft},{dsg}.rds"
+    log:    "logs/sim_frg_{mtf},{eft},{dsg}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+rule sim_wgt:
+    priority: 98
+    input:  "code/01-sim_weight.R",
+            rules.sim_frg.output
+    output: sim_dat + "01-weight/{mtf},{eft},{dsg},{pkw}.rds"
+    log:    "logs/get_sim_{mtf},{eft},{dsg},{pkw}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} frg={input[1]} res={output}" {input[0]} {log}'''
+
+rule sim_ttl:
+    priority: 98
+    input:  "code/01-sim_total.R",
+            rules.sim_frg.output
+    output: sim_dat + "01-total/{mtf},{eft},{dsg}.rds"
+    log:    "logs/get_sim_{mtf},{eft},{dsg}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} frg={input[1]} res={output}" {input[0]} {log}'''
+
+
+rule pkd_sim_wgt:
+    priority: 98
+    input:  "code/03-pkd.R",
+            rules.sim_wgt.output
+    output: "outs/sim/pkd_wgt_{mtf},{eft},{dsg},{pkw}.rds"
+    log:    "logs/sim_pkd-{mtf},{eft},{dsg},{pkw}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} dat={input[1]} res={output}" {input[0]} {log}'''
+
+rule pkd_sim_ttl:
+    priority: 98
+    input:  "code/03-pkd.R",
+            rules.sim_ttl.output
+    output: "outs/sim/pkd_ttl_{mtf},{eft},{dsg}.rds"
+    log:    "logs/sim_pkd-{mtf},{eft},{dsg}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} dat={input[1]} res={output}" {input[0]} {log}'''
+
+
+
+
+# VISUALIZATION ========================================================
+for val in VAL:
+    rule:
+        priority: 49
+        input:  expand("code/05-plt_{val}-{{plt}}.R", val = val), x = dat_res[val]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/dat/{val}-{{plt}}.pdf", val = val)
+        log:    expand("logs/plt_{val}-{{plt}}.Rout", val = val)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
+
+
+for wal in WAL:
+    rule:
+        priority: 49
+        input:  expand("code/05-qlt_{wal}-{{plt}}.R", wal = wal), x = tec_res[wal]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/tec/{wal}-{{plt}}.pdf", wal = wal)
+        log:    expand("logs/qlt_{wal}-{{plt}}.Rout", wal = wal)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
+            
+for yal in YAL:
+    rule:
+        priority: 49
+        input:  expand("code/05-flt_{yal}-{{plt}}.R", yal = yal), x = sim_res[yal]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/sim/{yal}-{{plt}}.pdf", yal = yal)
+        log:    expand("logs/flt_{yal}-{{plt}}.Rout", yal = yal)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
