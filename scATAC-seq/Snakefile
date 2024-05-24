@@ -1,0 +1,283 @@
+import json
+import itertools
+
+configfile: "config.yaml"
+R = config["R"]
+
+############### real datasets ################
+# WILDCARDS --------------------------------------------------------------------
+# motifs
+MOT = ["KLF1","RUNX1","GATA2","GATA1", "MYC", "RUNX2"] # MYC, RUNX2
+MDR = ["unmoderated", "moderated"]
+PKW = ["none"]
+SMT = ["none", "smooth.2d_1", "smooth.2d_1.5"]
+DIF = glob_wildcards("code/03-dif-{x}.R").x
+PKD = glob_wildcards("code/04-pkd-{x}.R").x
+STA = glob_wildcards("code/05-sta-{x}.R").x
+EVA = glob_wildcards("code/06-eva-{x}.R").x
+
+# RESULTS --------------------------------------------------------------------
+dat_dat = "/mnt/plger/jwang/scATAC-seq/"
+dat_frg = expand(dat_dat+"00-frg/{mot}.rds", mot=MOT)
+dat_ttl = expand(dat_dat+"01-ttl/{mot}.rds", mot=MOT)
+dat_wgt = expand(dat_dat+"01-wgt/{mot}-{smt}-{mdr}-{pkw}.rds", mot=MOT, smt=SMT, mdr=MDR, pkw=PKW)
+fil_ttl = expand(dat_dat+"02-fil_ttl/{mot}.rds", mot=MOT)
+fil_wgt = expand(dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}.rds", mot=MOT, smt=SMT, mdr=MDR, pkw=PKW)
+dat_cd = [
+    expand(dat_dat+"02-fil_ttl/{mot}-cd.rds", mot=MOT),
+    expand(dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}-cd.rds", mot=MOT, smt=SMT, mdr=MDR, pkw=PKW)]
+dat_dif = [
+    expand("outs/dif-total-{mot},{dif}.rds", mot=MOT, dif=DIF),
+    expand("outs/dif-weight-{mot}-{smt}-{mdr}-{pkw},{dif}.rds", mot=MOT, smt=SMT, mdr=MDR, 
+            pkw=PKW, dif=[x for x in DIF if "chromVAR" not in x])]
+
+dat_pkd = [
+    expand("outs/pkd-total-{mot},{pkd}.rds", mot=MOT, pkd=PKD),
+    expand("outs/pkd-weight-{mot}-{smt}-{mdr}-{pkw},{pkd}.rds", mot=MOT, smt=SMT, mdr=MDR, pkw=PKW, pkd=PKD)]
+
+dat_sta = [
+    expand("outs/sta-total-{mot},{sta}.rds", mot=MOT, sta=STA),
+    expand("outs/sta-weight-{mot}-{smt}-{mdr}-{pkw},{sta}.rds", mot=MOT, smt=SMT, mdr=MDR, pkw=PKW, sta=STA)]
+
+
+waag_ttl = "/mnt/plger/jwang/scATAC-seq/waag/01-ttl.rds"
+waag_wgt = expand("/mnt/plger/jwang/scATAC-seq/waag/01-wgt-{smt}-{mdr}.rds", smt=SMT, mdr=MDR)
+waag_cd = [
+    "/mnt/plger/jwang/scATAC-seq/waag/01-ttl-cd.rds",
+    expand("/mnt/plger/jwang/scATAC-seq/waag/01-wgt-{smt}-{mdr}-{pkw}-cd.rds", smt=SMT, mdr=MDR, pkw=PKW)
+]
+waag_eva = [
+    expand("outs/eva-waag_ttl,{eva}.rds", eva=EVA),
+    expand("outs/eva-waag_wgt-{smt}-{mdr}-{pkw},{eva}.rds", smt=SMT, mdr=MDR, pkw=PKW, eva=EVA)
+]
+
+
+dat_res = {
+    "frg": dat_frg,
+    "ttl": dat_ttl,
+    "wgt": dat_wgt,
+    "ttl2": fil_ttl,
+    "wgt2": fil_wgt,
+    "cd": dat_cd,
+    "dif": dat_dif,
+    "pkd": dat_pkd,
+    "sta": dat_sta
+}
+
+waag_res = {
+    "ttl": waag_ttl,
+    "wgt": waag_wgt,
+    "cd": waag_cd,
+    "eva": waag_eva
+}
+
+# visualization
+plt = []
+VAL = dat_res.keys()
+for val in VAL:
+    x = glob_wildcards("code/07-plt_"+val+"-{x}.R").x
+    plt += expand("plts/dat/{val}-{plt}.pdf", val=val, plt=x)
+
+
+qlt = []
+WAL = waag_res.keys()
+for wal in WAL:
+    x = glob_wildcards("code/07-qlt_"+wal+"-{x}.R").x
+    qlt += expand("plts/waag/{wal}-{qlt}.pdf", wal=wal, qlt=x)
+
+# SETUP ========================================================================
+
+rule all: 
+    input:
+        [x for x in dat_res.values()], plt
+       # [x for x in waag_res.values()], qlt
+
+
+rule get_frg:
+    priority: 99
+    input:  "code/00-frg.R",
+    output: dat_dat+"00-frg/{mot}.rds"
+    log:    "logs/00-frg-{mot}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output}" {input[0]} {log}'''
+
+rule get_ttl:
+    priority: 98
+    input:  "code/01-get_ttl.R",
+            dat_dat+"00-frg/{mot}.rds"
+    output: dat_dat+"01-ttl/{mot}.rds"
+    log:    "logs/01-ttl-{mot}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} frg={input[1]}" {input[0]} {log}'''
+
+rule get_wgt:
+    priority: 98
+    input:  "code/01-get_wgt.R",
+            dat_dat+"00-frg/{mot}.rds"
+    output: dat_dat+"01-wgt/{mot}-{smt}-{mdr}-{pkw}.rds"
+    log:    "logs/01-wgt-{mot}-{smt}-{mdr}-{pkw}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} frg={input[1]}" {input[0]} {log}'''
+
+rule get_waag_ttl:
+    priority: 98
+    input:  "code/01-get_waag_ttl.R"
+    output: "/mnt/plger/jwang/scATAC-seq/waag/01-ttl.rds",
+            "/mnt/plger/jwang/scATAC-seq/waag/01-ttl-cd.rds"
+    log:    "logs/01-waag_ttl.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output[0]} cd={output[1]}" {input[0]} {log}'''
+
+rule get_waag_wgt:
+    priority: 98
+    input:  "code/01-get_waag_wgt.R"
+    output: "/mnt/plger/jwang/scATAC-seq/waag/01-wgt-{smt}-{mdr}-{pkw}.rds",
+            "/mnt/plger/jwang/scATAC-seq/waag/01-wgt-{smt}-{mdr}-{pkw}-cd.rds"
+    log:    "logs/01-waag_wgt-{smt}-{mdr}-{pkw}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output[0]} cd={output[1]}" {input[0]} {log}'''
+
+rule fil_ttl: 
+    priority: 97
+    input:  "code/02-fil.R",
+            dat_dat+"01-ttl/{mot}.rds"
+    output: dat_dat+"02-fil_ttl/{mot}.rds",
+                dat_dat+"02-fil_ttl/{mot}-cd.rds"
+    log:    "logs/02-fil_ttl-{mot}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} dat={input[1]} res={output[0]} cd={output[1]}" {input[0]} {log}'''
+
+rule fil_wgt: 
+    priority: 97
+    input:  "code/02-fil_waag.R",
+            dat_dat+"01-wgt/{mot}-{smt}-{mdr}-{pkw}.rds"
+    output: dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}.rds",
+            dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}-cd.rds"
+    log:    "logs/02-fil_wgt-{mot}-{smt}-{mdr}-{pkw}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} dat={input[1]} res={output[0]} cd={output[1]}" {input[0]} {log}'''
+
+
+rule dif_ttl:
+    priority: 96
+    input:  "code/03-dif.R",
+            "code/03-dif-{dif}.R",
+            dat_dat+"02-fil_ttl/{mot}.rds"
+    output: "outs/dif-total-{mot},{dif}.rds"
+    log:    "logs/dif-total-{mot},{dif}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+rule dif_wgt:
+    priority: 96
+    input:  "code/03-dif.R",
+            "code/03-dif-{dif}.R",
+            dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}.rds"
+    output: "outs/dif-weight-{mot}-{smt}-{mdr}-{pkw},{dif}.rds"
+    log:    "logs/dif-weight-{mot}-{smt}-{mdr}-{pkw},{dif}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+rule pkd_ttl:
+    priority: 96
+    input:  "code/04-pkd.R",
+            "code/04-pkd-{pkd}.R",
+            dat_dat+"02-fil_ttl/{mot}.rds"
+    output: "outs/pkd-total-{mot},{pkd}.rds"
+    log:    "logs/pkd-total-{mot},{pkd}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+rule pkd_wgt:
+    priority: 96
+    input:  "code/04-pkd.R",
+            "code/04-pkd-{pkd}.R",
+            dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}.rds"
+    output: "outs/pkd-weight-{mot}-{smt}-{mdr}-{pkw},{pkd}.rds"
+    log:    "logs/pkd-weight-{mot}-{smt}-{mdr}-{pkw},{pkd}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+
+rule sta_ttl:
+    priority: 95
+    input:  "code/05-sta.R",
+            "code/05-sta-{sta}.R",
+            dat_dat+"02-fil_ttl/{mot}.rds"
+    output: "outs/sta-total-{mot},{sta}.rds"
+    log:    "logs/sta-total-{mot},{sta}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+    
+rule sta_wgt:
+    priority: 96
+    input:  "code/05-sta.R",
+            "code/05-sta-{sta}.R",
+            dat_dat+"02-fil_wgt/{mot}-{smt}-{mdr}-{pkw}.rds"
+    output: "outs/sta-weight-{mot}-{smt}-{mdr}-{pkw},{sta}.rds"
+    log:    "logs/sta-weight-{mot}-{smt}-{mdr}-{pkw},{sta}.Rout"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+
+rule eva_ttl:
+    priority: 95
+    input:  "code/06-eva.R",
+            "code/06-eva-{eva}.R",
+            "/mnt/plger/jwang/scATAC-seq/waag/01-ttl-cd.rds"
+    output: "outs/eva-waag_ttl,{eva}.rds"
+    log:    "logs/eva-waag_ttl,{eva}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+
+
+rule eva_wgt:
+    priority: 95
+    input:  "code/06-eva.R",
+            "code/06-eva-{eva}.R",
+            "/mnt/plger/jwang/scATAC-seq/waag/01-wgt-{smt}-{mdr}-{pkw}-cd.rds"
+    output: "outs/eva-waag_wgt-{smt}-{mdr}-{pkw},{eva}.rds"
+    log:    "logs/eva-waag_wgt-{smt}-{mdr}-{pkw},{eva}.rds"
+    shell: '''
+        {R} CMD BATCH --no-restore --no-save "--args\
+        wcs={wildcards} res={output} dat={input[2]} fun={input[1]}" {input[0]} {log}'''
+
+# VISUALIZATION ========================================================
+for val in VAL:
+    rule:
+        priority: 49
+        input:  expand("code/07-plt_{val}-{{plt}}.R", val = val), x = dat_res[val]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/dat/{val}-{{plt}}.pdf", val = val)
+        log:    expand("logs/dat_plt_{val}-{{plt}}.Rout", val = val)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
+
+
+
+for wal in WAL:
+    rule:
+        priority: 40
+        input:  expand("code/07-qlt_{wal}-{{qlt}}.R", wal=wal), x=waag_res[wal]
+        params: lambda wc, input: ";".join(input.x)
+        output: expand("plts/waag/{wal}-{{qlt}}.pdf", wal=wal)
+        log:    expand("logs/qlt_{wal}-{{qlt}}.Rout", wal=wal)
+        shell:  '''
+            {R} CMD BATCH --no-restore --no-save "--args\
+            {params} {output[0]}" {input[0]} {log}'''
