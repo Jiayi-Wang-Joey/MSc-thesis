@@ -19,5 +19,5 @@
 
 ### scATAC-seq: Evaluation of the fragment weight correction on the 6 scATAC-seq datasets
 - `code/`:
-  - 
+  - `00-frg.R`: read the ATAC-seq fragments in BED/BAM format and save it as a list of fragments for each dataset
 
