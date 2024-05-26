@@ -14,8 +14,8 @@
   - `03-pkd.R`: differential accessiblity test on peak levels using `limma-voom`
   
   **Insertion model**
-  - `04-mms.R`: Calculate the motif scores and background scores for each dataset
-  - `05-mmd.R`: Using the motif scores and background scores to calculate the z-score and apply `limma` or directly apply `limma-voom` on the motif scores.
+  - `04-mms.R`: calculate the motif scores and background scores for each dataset
+  - `05-mmd.R`: using the motif scores and background scores to calculate the z-score and apply `limma` or directly apply `limma-voom` on the motif scores.
 
 ### scATAC-seq: Evaluation of the fragment weight correction on the 6 scATAC-seq datasets
 - `code/`:
@@ -28,6 +28,8 @@
  
 ### loess-comparison: Investigate the subsampling and loess parameters and the weight model on semi-simulated CTCF/MAZ-FL/GC datasets
 - `code/`:
-  - `00-sim_frg.R`:  
-  - `01-weight.R`: 
+  - `00-sim_frg.R`: read the ATAC-seq fragments in BED/BAM format and save it as a list of fragments for samples for CTCF/MAZ-FL/GC datasets
+  - `01-weight.R`: get the fragment+peak weighted peak-level accessibility counts using different span, loess family, number of bins and samples for subsampling for loess for 4 picked experimental bulk ATAC-seq datasets.
+  - `02-dif.R`: differential accessible motif activity analysis using `limma-voom` for experimental datasets
+  - `03-pkd.R`: differential accessibility tests on peak levels using `limma-voom` for CTCF/MAZ-FL/GC datasets
 
